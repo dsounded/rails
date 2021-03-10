@@ -1049,6 +1049,8 @@ module ActiveRecord
       end
   end
 
+  MigrationProxyWithConfig = Struct.new(:migration, :db_config)
+
   # MigrationContext sets the context in which a migration is run.
   #
   # A migration context requires the path to the migrations is set
