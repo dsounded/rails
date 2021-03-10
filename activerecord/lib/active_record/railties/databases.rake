@@ -87,10 +87,35 @@ db_namespace = namespace :db do
   desc "Migrate the database (options: VERSION=x, VERBOSE=false, SCOPE=blog)."
   task migrate: :load_config do
     original_db_config = ActiveRecord::Base.connection_db_config
-    ActiveRecord::Base.configurations.configs_for(env_name: ActiveRecord::Tasks::DatabaseTasks.env).each do |db_config|
+    # take all migrations
+    migrations = []
+    ActiveRecord::Tasks::DatabaseTasks.for_each(databases) do |name|
+      db_config = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env, name: name)
       ActiveRecord::Base.establish_connection(db_config)
-      ActiveRecord::Tasks::DatabaseTasks.migrate
+      with_config = ActiveRecord::Base.connection.migration_context.migrations.map do |migration|
+        ActiveRecord::MigrationProxyWithConfig.new(migration, db_config)
+      end
+      migrations.push(*with_config)
     end
+
+    # sort them by version
+    migrations.sort_by! { |migration_with_config| migration_with_config.migration.version }
+
+    # build proper connection intervals
+    connection_intervals = []
+    for i in 0...migrations.size do
+      # last one or the one before we change the connection
+      if i == migrations.size - 1 || migrations[i].db_config != migrations[i + 1].db_config
+        connection_intervals << migrations[i]
+      end
+    end
+
+    # executes intervals migrations
+    connection_intervals.each do |interval|
+      ActiveRecord::Base.establish_connection(interval.db_config)
+      ActiveRecord::Tasks::DatabaseTasks.migrate(interval.migration.version)
+    end
+
     db_namespace["_dump"].invoke
   ensure
     ActiveRecord::Base.establish_connection(original_db_config)
